@@ -32,7 +32,7 @@
     "longDescription": "Sapu Jagat scans for junk, shows what is using your RAM, CPU and disk, and cleans only what is safe. Everything it removes is explained first.",
     "windows": {
       "nsis": {
-        "installMode": "currentUser",
+        "installMode": "perMachine",
         "languages": ["English"]
       }
     }
