@@ -13,6 +13,9 @@ use std::sync::{Arc, Mutex};
 use sapu_core::analyze::{self, Annotator, Tag};
 use sapu_core::clean::{self, Options, Report};
 use sapu_core::devjunk::{self, Junk};
+use sapu_core::fsx;
+use sapu_core::leftovers::{self, Leftover};
+use sapu_core::settings::{self, Settings};
 use sapu_core::procs::{self, LiveSample, Sampler, Snapshot, SysInfo};
 use sapu_core::system::{self, Battery, Details};
 use sapu_core::rules::{self, Cat, Kind, Risk, Rule};
@@ -118,6 +121,7 @@ struct RuleRow {
     close: Vec<&'static str>,
     special: bool,
     locations: Vec<String>,
+    items: Vec<String>,
     bytes: Option<u64>,
     files: u64,
     available: bool,
@@ -154,6 +158,7 @@ fn row(r: &Rule, s: Option<&scan::RuleScan>) -> RuleRow {
                 .collect(),
             Kind::Special(_) => vec!["Built-in system action (no folder is deleted by path)".to_string()],
         },
+        items: s.map(|s| s.items.clone()).unwrap_or_default(),
         bytes: s.and_then(|s| s.bytes),
         files: s.map(|s| s.files).unwrap_or(0),
         available: s.map(|s| s.available).unwrap_or(true),
@@ -164,7 +169,59 @@ fn row(r: &Rule, s: Option<&scan::RuleScan>) -> RuleRow {
 
 #[tauri::command]
 fn catalog() -> Vec<RuleRow> {
-    rules::catalog().iter().map(|r| row(r, None)).collect()
+    rules::catalog_all().iter().map(|r| row(r, None)).collect()
+}
+
+#[derive(Serialize)]
+struct RuleSetting {
+    id: &'static str,
+    name: &'static str,
+    cat: &'static str,
+    cat_title: &'static str,
+    risk: &'static str,
+    admin: bool,
+    enabled: bool,
+    recommended: bool,
+    base_recommended: bool,
+}
+
+#[derive(Serialize)]
+struct SettingsView {
+    settings: Settings,
+    rules: Vec<RuleSetting>,
+}
+
+fn settings_view() -> SettingsView {
+    let s = settings::current();
+    let rules = rules::catalog_all()
+        .iter()
+        .map(|r| RuleSetting {
+            id: r.id,
+            name: r.name,
+            cat: cat_key(r.cat),
+            cat_title: r.cat.title(),
+            risk: risk_key(r.risk),
+            admin: r.admin,
+            enabled: !s.disabled_rules.iter().any(|d| d == r.id),
+            recommended: s.recommended.get(r.id).copied().unwrap_or(r.default_on),
+            base_recommended: r.default_on,
+        })
+        .collect();
+    SettingsView { settings: s, rules }
+}
+
+#[tauri::command]
+fn settings_get() -> SettingsView {
+    settings_view()
+}
+
+#[tauri::command]
+fn settings_save(new: Settings) -> Result<SettingsView, String> {
+    let ids: Vec<&str> = rules::catalog_all().iter().map(|r| r.id).collect();
+    let clean = settings::validate(new, &ids)?;
+    settings::save(&clean).map_err(|e| format!("could not save settings: {e}"))?;
+    settings::apply(clean);
+    Ok(settings_view())
 }
 
 #[tauri::command]
@@ -184,7 +241,7 @@ async fn run_clean(app: AppHandle, ids: Vec<String>, close_apps: bool) -> Result
         let wanted: HashSet<&str> = ids.iter().map(String::as_str).collect();
         let chosen: Vec<&Rule> = all.iter().filter(|r| wanted.contains(r.id)).collect();
         let admin = winenv::is_admin();
-        clean::execute(&chosen, &Options { close_apps, restore_point: true }, admin, &mut |ev| {
+        clean::execute(&chosen, &Options { close_apps, restore_point: settings::current().restore_point }, admin, &mut |ev| {
             let _ = app.emit("clean-event", ev);
         })
     })
@@ -320,7 +377,7 @@ fn load_cache() -> HashMap<String, AnalysisView> {
 }
 
 fn an_key(p: &str) -> String {
-    p.trim_end_matches('\\').to_lowercase()
+    fsx::canon_key(p)
 }
 
 fn now_secs() -> u64 {
@@ -523,6 +580,60 @@ fn start_live(app: AppHandle, exes: LiveExes) {
     });
 }
 
+/// Result of the last "possible leftovers" scan. Only paths in this list (or in a stored analysis) can be recycled.
+struct LeftState(Mutex<Vec<Leftover>>);
+
+#[tauri::command]
+async fn leftovers_find(state: State<'_, LeftState>) -> Result<Vec<Leftover>, String> {
+    let found = blocking(leftovers::find).await?;
+    *state.0.lock().unwrap() = found.clone();
+    Ok(found)
+}
+
+fn same_path(a: &str, b: &str) -> bool {
+    fsx::canon_key(a) == fsx::canon_key(b)
+}
+
+#[tauri::command]
+fn path_reveal(path: String) -> Result<(), String> {
+    if !Path::new(&path).exists() {
+        return Err("that item no longer exists".into());
+    }
+    if winenv::reveal(&path) { Ok(()) } else { Err("could not open Explorer".into()) }
+}
+
+/// Moves one item to the Recycle Bin. The UI cannot name arbitrary paths: the item must come from a stored
+/// analysis or the leftovers scan, and the safety guard must accept it (system folders, drive roots, credentials,
+/// Claude data and your Settings exclusions are refused).
+#[tauri::command]
+async fn path_recycle(an: State<'_, AnCache>, left: State<'_, LeftState>, path: String) -> Result<(), String> {
+    let known = an.0.lock().unwrap().values().any(|v| v.items.iter().any(|i| same_path(&i.path, &path)) || v.big_files.iter().any(|f| same_path(&f.path, &path)))
+        || left.0.lock().unwrap().iter().any(|l| same_path(&l.path, &path));
+    if !known {
+        return Err("that item is not part of the current results".into());
+    }
+    if let Err(why) = fsx::guard_opts(Path::new(&path), true) {
+        return Err(format!("refused: {why}"));
+    }
+    let p2 = path.clone();
+    blocking(move || winenv::recycle(&p2)).await??;
+    // keep the stored analyses honest: drop the item and its size
+    let mut m = an.0.lock().unwrap();
+    for v in m.values_mut() {
+        if let Some(pos) = v.items.iter().position(|i| same_path(&i.path, &path)) {
+            let gone = v.items.remove(pos);
+            v.total = v.total.saturating_sub(gone.bytes);
+        }
+        v.big_files.retain(|f| !same_path(&f.path, &path));
+    }
+    if let Ok(json) = serde_json::to_string(&*m) {
+        let _ = std::fs::write(cache_file(), json);
+    }
+    drop(m);
+    left.0.lock().unwrap().retain(|l| !same_path(&l.path, &path));
+    Ok(())
+}
+
 #[tauri::command]
 fn relaunch_admin(app: AppHandle) -> bool {
     if winenv::relaunch_as_admin(&[]) {
@@ -534,8 +645,10 @@ fn relaunch_admin(app: AppHandle) -> bool {
 }
 
 fn main() {
+    settings::init();
     tauri::Builder::default()
         .manage(DevState(Mutex::new(Vec::new())))
+        .manage(LeftState(Mutex::new(Vec::new())))
         .manage(AnCache(Arc::new(Mutex::new(load_cache()))))
         .manage(LiveExes(Arc::new(Mutex::new(HashSet::new()))))
         .manage(IconCache(Arc::new(Mutex::new(HashMap::new()))))
@@ -560,6 +673,11 @@ fn main() {
             startup_list,
             startup_set,
             process_icons,
+            settings_get,
+            settings_save,
+            leftovers_find,
+            path_reveal,
+            path_recycle,
             analyze_path,
             analyze_all,
             analysis_get,

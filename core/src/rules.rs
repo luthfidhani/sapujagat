@@ -62,6 +62,8 @@ pub enum Special {
     ComponentStore,
     EventLogs,
     Hibernation,
+    DockerCompact,
+    OldDrivers,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -174,7 +176,24 @@ fn chromium(user_data: &str) -> Vec<Target> {
     v
 }
 
+/// The rules in effect: every rule except the ones the user switched off in Settings,
+/// with the user's "recommended" overrides applied.
 pub fn catalog() -> Vec<Rule> {
+    let s = crate::settings::current();
+    catalog_all()
+        .into_iter()
+        .filter(|r| !s.disabled_rules.iter().any(|d| d == r.id))
+        .map(|mut r| {
+            if let Some(v) = s.recommended.get(r.id) {
+                r.default_on = *v;
+            }
+            r
+        })
+        .collect()
+}
+
+/// Every rule the engine knows, regardless of settings.
+pub fn catalog_all() -> Vec<Rule> {
     use Cat::*;
     use Risk::*;
     let mut r: Vec<Rule> = Vec::new();
@@ -262,6 +281,10 @@ pub fn catalog() -> Vec<Rule> {
         "Turns off hibernation; frees a file about 40% of your RAM size.",
         "BEHAVIOUR CHANGE: no hibernate and no Fast Startup. Re-enable any time with `powercfg /h on`.",
         Kind::Special(Special::Hibernation)).admin().risk(Advanced).done());
+    r.push(B::new("old-drivers", "Old driver versions (DriverStore)", System,
+        "Older versions of driver packages that Windows keeps after installing a newer one.",
+        "You can no longer roll those drivers back to the old version. Drivers in use, boot-critical or built into Windows are never removed. A restore point is created first.",
+        Kind::Special(Special::OldDrivers)).admin().risk(Careful).done());
 
     // ───────────────────────── GPU shader caches ─────────────────────────
     r.push(B::new("shader-nvidia", "NVIDIA shader cache", Gpu,
@@ -358,6 +381,10 @@ pub fn catalog() -> Vec<Rule> {
         "Volumes not attached to any container (databases, uploads...).",
         "DATA LOSS RISK: anything stored only in those volumes is gone for good.",
         Kind::Special(Special::DockerVolumes)).risk(Advanced).done());
+    r.push(B::new("docker-compact", "Shrink Docker's virtual disk", Docker,
+        "Docker keeps its images and volumes in one virtual disk file (VHDX) that never gets smaller by itself, even after pruning.",
+        "Stops Docker Desktop and every running container first, then compacts the disk file. This can take several minutes. Docker stays off afterwards until you start it. Nothing inside the disk is deleted.",
+        Kind::Special(Special::DockerCompact)).admin().risk(Advanced).done());
 
     // ───────────────────────── App caches ─────────────────────────
     r.push(B::new("app-steam", "Steam web & shader cache", Apps, "Steam's embedded browser cache and compiled shaders.",

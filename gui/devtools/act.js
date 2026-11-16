@@ -9,6 +9,8 @@
     if (act === 'devscan') { click('#dv-scan'); }
     if (act === 'sorthist') { click('table[data-tk="hist"] th:nth-child(2)'); click('table[data-tk="hist"] th:nth-child(2)'); click('table[data-tk="hist"] th:nth-child(1)'); }
     if (act === 'sortboost') { click('th[data-b="cpu"]'); }
+    if (act === 'leftscan') { click('#lf-scan'); await wait(1500); click('#lf-all'); }
+    if (act === 'cleanitems') { await wait(500); click('.rule[data-id="old-drivers"] [data-toggle]'); click('.rule[data-id="docker-compact"] [data-toggle]'); }
     if (act === 'boostopen') { await wait(600); click('.rowtoggle'); await wait(300); click('#b-all'); }
     if (act === 'storelist') { click('#an-mode [data-m="list"]'); await wait(300); click('table[data-tk="stlist"] th:nth-child(1)'); }
     if (act === 'cleanmodal' || act === 'result') {

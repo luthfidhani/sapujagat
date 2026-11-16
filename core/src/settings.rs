@@ -84,8 +84,11 @@ pub fn validate(mut s: Settings, known_rules: &[&str]) -> Result<Settings, Strin
         if !Path::new(&t).is_dir() {
             return Err(format!("\"{t}\" is not an existing folder"));
         }
-        if !ex.iter().any(|e| e.eq_ignore_ascii_case(&t)) {
-            ex.push(t);
+        // store the canonical spelling (resolves doubled slashes, short 8.3 names, case)
+        let canon = std::fs::canonicalize(&t).map(|p| p.display().to_string()).unwrap_or(t.clone());
+        let canon = canon.strip_prefix("\\\\?\\").unwrap_or(&canon).trim_end_matches('\\').to_string();
+        if !ex.iter().any(|e| e.eq_ignore_ascii_case(&canon)) {
+            ex.push(canon);
         }
     }
     s.exclusions = ex;

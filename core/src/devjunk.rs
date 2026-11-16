@@ -128,6 +128,7 @@ pub fn find(roots: &[PathBuf]) -> Vec<Junk> {
             v
         })
         .collect();
+    all.retain(|j| !fsx::is_excluded(&j.path));
     all.sort_by(|a, b| b.bytes.cmp(&a.bytes));
     all
 }

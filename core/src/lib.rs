@@ -3,8 +3,11 @@
 pub mod analyze;
 pub mod clean;
 pub mod devjunk;
+pub mod dockerdisk;
+pub mod drivers;
 pub mod fsx;
 pub mod icons;
+pub mod leftovers;
 pub mod procs;
 pub mod rules;
 pub mod scan;

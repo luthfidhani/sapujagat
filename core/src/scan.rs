@@ -20,6 +20,12 @@ pub struct RuleScan {
     pub note: Option<String>,
     /// Apps from `rule.close` that are currently running (they lock files).
     pub running: Vec<String>,
+    /// What was found, one line each (driver packages, Docker disks...). Shown in the rule's details.
+    pub items: Vec<String>,
+}
+
+fn gb(b: u64) -> String {
+    format!("{:.2} GB", b as f64 / 1_073_741_824.0)
 }
 
 pub struct DockerState {
@@ -93,7 +99,7 @@ pub fn scan_all(rules: &[Rule]) -> Vec<RuleScan> {
 
 fn scan_one(r: &Rule, running: &HashSet<String>, docker: &DockerState, admin: bool) -> RuleScan {
     let running_apps: Vec<String> = r.close.iter().filter(|c| running.contains(&c.to_lowercase())).map(|s| s.to_string()).collect();
-    let mut s = RuleScan { id: r.id, bytes: Some(0), files: 0, available: true, note: None, running: running_apps };
+    let mut s = RuleScan { id: r.id, bytes: Some(0), files: 0, available: true, note: None, running: running_apps, items: vec![] };
     match &r.kind {
         Kind::Paths(targets) => {
             let mut any = false;
@@ -157,6 +163,40 @@ fn scan_one(r: &Rule, running: &HashSet<String>, docker: &DockerState, admin: bo
                     }
                 }
             },
+            Special::DockerCompact => {
+                let d = crate::dockerdisk::disks();
+                if d.is_empty() {
+                    s.available = false;
+                    s.note = Some("no Docker virtual disk found".into());
+                } else {
+                    s.bytes = None;
+                    s.files = d.len() as u64;
+                    s.items = d.iter().map(|(p, b)| format!("{}  ({})", p.display(), gb(*b))).collect();
+                    s.note = Some(format!("Disk file is {}. How much shrinks is known after compacting.", gb(d.iter().map(|x| x.1).sum())));
+                }
+            }
+            Special::OldDrivers => {
+                if !admin {
+                    s.bytes = None;
+                    s.note = Some("needs Administrator to inspect".into());
+                } else {
+                    match crate::drivers::find() {
+                        Ok(list) if list.is_empty() => {
+                            s.available = false;
+                            s.note = Some("no old driver versions found".into());
+                        }
+                        Ok(list) => {
+                            s.bytes = Some(list.iter().map(|d| d.bytes).sum());
+                            s.files = list.len() as u64;
+                            s.items = list.iter().map(|d| format!("{}  {}  {} {}  ({}), newer {} stays", d.published, d.provider, d.class, d.version, gb(d.bytes), d.kept)).collect();
+                        }
+                        Err(e) => {
+                            s.available = false;
+                            s.note = Some(format!("could not read drivers: {e}"));
+                        }
+                    }
+                }
+            }
         },
     }
     s

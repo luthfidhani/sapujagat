@@ -35,6 +35,12 @@ const ICONS = {
   history: '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 2"/>',
   system: '<rect x="3" y="4.5" width="18" height="12" rx="2"/><path d="M8.5 20h7M12 16.5V20"/>',
   catalog: '<path d="M5 6h14M5 12h14M5 18h9"/>',
+  leftovers: '<path d="M3.5 7a2 2 0 0 1 2-2H10l2 2.5h6.5a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9.5 13.5h5"/>',
+  settings: '<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/>',
+  reveal: '<path d="M14 5h5v5"/><path d="M19 5l-8 8"/><path d="M17 13v4a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2h4"/>',
+  trash: '<path d="M5 7h14"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  x: '<path d="M6 6l12 12M18 6L6 18"/>',
   lock: '<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
   chevron: '<path d="M9 6l6 6-6 6"/>',
   search: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.2-4.2"/>',
@@ -65,8 +71,8 @@ let route = 'overview';
 
 const NAV = [
   ['Maintain', [['overview', 'Overview'], ['clean', 'Clean'], ['boost', 'Boost'], ['startup', 'Startup']]],
-  ['Inspect', [['storage', 'Storage'], ['developer', 'Developer'], ['history', 'History'], ['system', 'System']]],
-  ['Reference', [['catalog', 'Catalog']]],
+  ['Inspect', [['storage', 'Storage'], ['leftovers', 'Leftovers'], ['developer', 'Developer'], ['history', 'History'], ['system', 'System']]],
+  ['Reference', [['catalog', 'Catalog'], ['settings', 'Settings']]],
 ];
 const TITLES = {};
 NAV.forEach(([, items]) => items.forEach(([id, t]) => (TITLES[id] = t)));
@@ -131,6 +137,26 @@ const classLabel = { Protected: ['protected', 'Protected'], Helper: ['helper', '
 const meter = (f, cls = '') => `<div class="meter ${cls}"><i style="width:${Math.max(0, Math.min(1, f)) * 100}%"></i></div>`;
 const pageHead = (title, sub = '', actions = '') => `<div class="head"><div><h1>${esc(title)}</h1>${sub ? `<p>${sub}</p>` : ''}</div><div class="row">${actions}</div></div>`;
 const mount = (html) => { view.innerHTML = html; initSort(); };
+
+/* File actions shared by Storage and Leftovers. The engine only accepts paths from its own current results. */
+const actBtns = (path) => `<span class="acts"><button class="iconbtn" data-reveal="${esc(path)}" title="Show in Explorer" aria-label="Show in Explorer">${ic('reveal', 'sm')}</button><button class="iconbtn" data-recycle="${esc(path)}" title="Move to Recycle Bin" aria-label="Move to Recycle Bin">${ic('trash', 'sm')}</button></span>`;
+async function revealPath(p) { try { await invoke('path_reveal', { path: p }); } catch (e) { toast(String(e), 'bad'); } }
+/* items: [{ path, bytes }]. Returns how many were moved. Recoverable from the Recycle Bin. */
+async function recyclePaths(items) {
+  const sum = items.reduce((a, i) => a + (i.bytes || 0), 0);
+  const r = await confirmModal({
+    title: `Move ${items.length} item${items.length > 1 ? 's' : ''} to the Recycle Bin`,
+    intro: `${human(sum)} in total. You can restore them from the Recycle Bin. The space only comes back after you empty it.`,
+    body: items.slice(0, 8).map((i) => `<div class="mi mono">${esc(i.path)}</div>`).join('') + (items.length > 8 ? `<div class="mi muted">and ${items.length - 8} more</div>` : ''),
+    ok: 'Move to Recycle Bin', danger: true,
+  });
+  if (!r.ok) return [];
+  const ok = [], errs = [];
+  for (const i of items) { try { await invoke('path_recycle', { path: i.path }); ok.push(i.path); } catch (e) { errs.push(String(e)); } }
+  if (ok.length) toast(`Moved ${ok.length} item${ok.length > 1 ? 's' : ''} to the Recycle Bin.`, 'ok');
+  if (errs.length) toast(errs[0] + (errs.length > 1 ? ` (and ${errs.length - 1} more problems)` : ''), 'bad');
+  return ok;
+}
 
 /* App icons: the engine extracts them from each program's .exe. Until one arrives (or if there is none) a letter tile shows. */
 const APP_ICONS = {};

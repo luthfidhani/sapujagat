@@ -78,6 +78,7 @@ fn main() {
     let admin = winenv::is_admin();
     let interactive = std::io::stdin().is_terminal();
 
+    sapu_core::settings::init();
     let mut relaunched = false;
     match cli.cmd {
         None => {

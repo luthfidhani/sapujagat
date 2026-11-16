@@ -2,7 +2,7 @@
    Data mirrors a real scan of this PC; the live feed is a random walk emitted once per second. */
 (function () {
   const GB = 1024 ** 3, MB = 1024 ** 2;
-  const R = (id, name, cat, cat_title, risk, admin, def, what, effect, bytes, extra = {}) => ({ id, name, cat, cat_title, risk, admin, default_on: def, what, effect, close: [], special: false, locations: ['%LOCALAPPDATA%\\' + name.replace(/\s/g, '')], bytes, files: 10, available: true, note: null, running: [], ...extra });
+  const R = (id, name, cat, cat_title, risk, admin, def, what, effect, bytes, extra = {}) => ({ id, name, cat, cat_title, risk, admin, default_on: def, what, effect, close: [], special: false, locations: ['%LOCALAPPDATA%\\' + name.replace(/\s/g, '')], bytes, files: 10, items: [], available: true, note: null, running: [], ...extra });
   const rules = [
     R('temp-user', 'User temp files', 'system', 'Windows & System', 'safe', false, true, 'Leftovers apps wrote to %TEMP%.', 'Files older than 2 days only.', 24.7 * MB, { locations: ['%TEMP%   older than 2 days'] }),
     R('crash-dumps', 'Crash dumps (user)', 'system', 'Windows & System', 'safe', false, true, 'Memory dumps apps left after crashing.', 'Only useful for debugging.', 274 * MB),
@@ -14,6 +14,7 @@
     R('component-store', 'Windows component store cleanup', 'system', 'Windows & System', 'safe', true, true, 'Runs DISM StartComponentCleanup.', 'Safe and supported by Microsoft.', null, { special: true, note: 'size known after run' }),
     R('event-logs', 'Windows event logs', 'system', 'Windows & System', 'careful', true, false, 'Clears the Event Viewer logs.', 'Erases troubleshooting history.', 384 * MB, { special: true }),
     R('hibernation', 'Hibernation file (hiberfil.sys)', 'system', 'Windows & System', 'advanced', true, false, 'Turns off hibernation.', 'Behaviour change: no hibernate and no Fast Startup.', null, { special: true }),
+    R('old-drivers', 'Old driver versions (DriverStore)', 'system', 'Windows & System', 'careful', true, false, 'Older versions of driver packages that Windows keeps after installing a newer one.', 'You can no longer roll those drivers back to the old version. Drivers in use, boot-critical or built into Windows are never removed. A restore point is created first.', 1.34 * GB, { special: true, files: 6, items: ['oem42.inf  NVIDIA  Display 31.0.15.2802  (612 MB), newer 31.0.15.5222 stays', 'oem17.inf  Intel  Display 30.0.101.1994  (402 MB), newer 31.0.101.5333 stays', 'oem9.inf  Realtek  Media 6.0.9500.1  (88 MB), newer 6.0.9650.1 stays'] }),
     R('shader-nvidia', 'NVIDIA shader cache', 'gpu', 'GPU shader caches', 'safe', false, true, "Compiled shaders NVIDIA's driver cached.", 'Games recompile shaders: brief stutter on first launch.', 4.31 * GB, { locations: ['%LOCALAPPDATA%\\NVIDIA\\DXCache', '%LOCALAPPDATA%\\NVIDIA\\GLCache'] }),
     R('br-brave', 'Brave cache', 'browser', 'Browsers', 'safe', false, true, 'Page cache and GPU caches. Cookies, history and passwords are not touched.', 'Sites load slower the first time.', 791 * MB, { running: ['brave.exe'], close: ['brave.exe'] }),
     R('br-edge', 'Microsoft Edge cache', 'browser', 'Browsers', 'safe', false, true, 'Page cache and GPU caches.', 'Sites load slower the first time.', 43.5 * MB),
@@ -21,6 +22,7 @@
     R('dev-cargo', 'Cargo registry cache', 'dev', 'Developer caches', 'careful', false, false, 'Downloaded crate archives.', 'Offline builds fail until re-downloaded.', 309 * MB),
     R('docker-build', 'Docker build cache', 'docker', 'Docker', 'safe', false, true, 'Layers cached from past builds.', 'Next build starts from scratch.', null, { special: true, available: false, note: 'Docker is not running. Start Docker Desktop to clean this.' }),
     R('docker-volumes', 'Docker unused volumes', 'docker', 'Docker', 'advanced', false, false, 'Volumes not attached to any container.', 'Data loss risk: anything only in those volumes is gone.', null, { special: true, available: false, note: 'Docker is not running' }),
+    R('docker-compact', "Shrink Docker's virtual disk", 'docker', 'Docker', 'advanced', true, false, "Docker keeps its images and volumes in one virtual disk file (VHDX) that never gets smaller by itself, even after pruning.", 'Stops Docker Desktop and every running container first, then compacts the disk file. This can take several minutes. Docker stays off afterwards until you start it. Nothing inside the disk is deleted.', null, { special: true, files: 1, items: ['C:\\ProgramData\\DockerDesktop\\vm-data\\DockerDesktop.vhdx  (5.73 GB)'], note: 'Disk file is 5.73 GB. How much shrinks is known after compacting.' }),
     R('app-steam', 'Steam web & shader cache', 'apps', 'App caches', 'safe', false, true, "Steam's embedded browser cache.", 'Store pages load slower once.', 356 * MB),
     R('priv-recent', 'Recent files & jump lists', 'privacy', 'Privacy traces', 'careful', false, false, 'Shortcuts to recently opened files.', 'Recent lists start empty.', 1.8 * MB),
   ];
@@ -80,6 +82,10 @@
     { when: '2026-11-16 13:02:11', total: 5.94 * GB, items: 11, top: [['NVIDIA shader cache', 4.31 * GB], ['Brave cache', 791 * MB], ['Steam web & shader cache', 356 * MB]] },
     { when: '2026-11-16 12:05:19', total: 3.33 * GB, items: 7, top: [['Temp files of other Windows accounts', 1.99 * GB], ['System crash dumps', 1.25 * GB]] },
     { when: '2026-11-16 11:58:50', total: 1.39 * GB, items: 4, top: [['User temp files', 1.39 * GB]] }];
+  const lf = (name, place, mb, age, root) => ({ path: root + '\\' + name, name, place, bytes: mb * MB, age_days: age, why: `No installed program, Store app or running process matches "${name}". Last changed ${age} days ago.` });
+  const leftovers = [lf('Adobe Genuine Service', 'ProgramData', 612, 410, 'C:\\ProgramData'), lf('OldVPNClient', 'AppData (Roaming)', 340, 530, 'C:\\Users\\Luthfi\\AppData\\Roaming'), lf('FlashPlayerCache', 'AppData (Local)', 118, 960, 'C:\\Users\\Luthfi\\AppData\\Local'), lf('Wondershare Helper Compact', 'ProgramData', 64, 188, 'C:\\ProgramData'), lf('tmpinstaller_7z', 'AppData (Local)', 22, 75, 'C:\\Users\\Luthfi\\AppData\\Local')];
+  let mockSettings = { exclusions: ['D:\\Projects\\keep-this-folder'], disabled_rules: [], recommended: {}, restore_point: true };
+  const settingsView = () => ({ settings: mockSettings, rules: rules.map((r) => ({ id: r.id, name: r.name, cat: r.cat, cat_title: r.cat_title, risk: r.risk, admin: r.admin, enabled: !mockSettings.disabled_rules.includes(r.id), recommended: mockSettings.recommended[r.id] ?? r.default_on, base_recommended: r.default_on })) });
   const handlers = {
     boot: () => ({ admin: q.get('admin') === '1', sys: { cpu: 'Intel Core i7-11800H', cores: 16, ram_used: 12.7 * GB, ram_total: 31.7 * GB, host: 'LUTHFI' }, drives, version: '0.1.0' }),
     drives: () => drives, catalog: () => rules.map((r) => ({ ...r, bytes: null })), scan_rules: () => rules,
@@ -100,6 +106,11 @@
       })());
       await Promise.all(jobs);
     },
+    settings_get: () => settingsView(),
+    settings_save: ({ new: n }) => { mockSettings = JSON.parse(JSON.stringify(n)); return settingsView(); },
+    leftovers_find: async () => { await sleep(700); return leftovers.slice(); },
+    path_reveal: () => null,
+    path_recycle: ({ path }) => { const i = leftovers.findIndex((l) => l.path === path); if (i >= 0) leftovers.splice(i, 1); return null; },
     process_icons: ({ paths }) => Object.fromEntries(paths.filter((p) => !/svchost|msedgewebview|explorer/i.test(p)).map((p) => { const c = ['#3e6ae1', '#c4352c', '#1d8a5b', '#a96a0c', '#6d4bd6'][p.length % 5]; const l = (p.split('\\').pop() || '?')[0].toUpperCase(); return [p, 'data:image/svg+xml;utf8,' + encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${c}"/><text x="16" y="22" font-size="17" font-family="Arial" font-weight="700" text-anchor="middle" fill="#fff">${l}</text></svg>`)]; })),
     trim_memory: () =>({ trimmed: 18, used_before: 12.7 * GB, used_after: 11.9 * GB }), kill_pids: () => ({ killed: 3, requested: 3 }),
     run_clean: async () => {

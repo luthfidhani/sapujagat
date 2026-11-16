@@ -41,6 +41,7 @@ function ruleRow(r, max) {
       <div class="kv"><span>What</span><span>${esc(r.what)}</span></div>
       <div class="kv"><span>Effect</span><span>${esc(r.effect)}</span></div>
       <div class="kv"><span>Risk</span><span>${esc(riskLabel[r.risk])}. ${esc(RISK_NOTE[r.risk])}</span></div>
+      ${r.items.length ? `<div class="kv"><span>Found</span><span class="mono">${r.items.map(esc).join('<br>')}</span></div>` : ''}
       <div class="kv"><span>Where</span><span class="mono">${r.locations.map(esc).join('<br>')}</span></div>
       ${req ? `<div class="kv"><span>Requires</span><span>${esc(req)}</span></div>` : ''}
     </div></div>`;

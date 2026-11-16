@@ -15,7 +15,10 @@ use windows_sys::Win32::System::ProcessStatus::EmptyWorkingSet;
 use windows_sys::Win32::System::Threading::{
     GetCurrentProcess, OpenProcess, OpenProcessToken, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA,
 };
-use windows_sys::Win32::UI::Shell::{SHEmptyRecycleBinW, SHQueryRecycleBinW, ShellExecuteW, SHQUERYRBINFO};
+use windows_sys::Win32::UI::Shell::{
+    SHEmptyRecycleBinW, SHFileOperationW, SHQueryRecycleBinW, ShellExecuteW, FOF_ALLOWUNDO, FOF_SILENT, FO_DELETE, SHFILEOPSTRUCTW,
+    SHQUERYRBINFO,
+};
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 const DRIVE_FIXED: u32 = 3;
@@ -154,6 +157,31 @@ pub fn trim_working_set(pid: u32) -> bool {
         CloseHandle(h);
         ok
     }
+}
+
+/// Move a file or folder to the Recycle Bin (recoverable). Without FOF_NOCONFIRMATION, Windows itself asks
+/// before permanently deleting anything that is too large for the bin.
+pub fn recycle(path: &str) -> Result<(), String> {
+    let mut from: Vec<u16> = path.encode_utf16().collect();
+    from.push(0);
+    from.push(0);
+    let mut op: SHFILEOPSTRUCTW = unsafe { std::mem::zeroed() };
+    op.wFunc = FO_DELETE as _;
+    op.pFrom = from.as_ptr();
+    op.fFlags = (FOF_ALLOWUNDO | FOF_SILENT) as _;
+    let r = unsafe { SHFileOperationW(&mut op) };
+    if r != 0 {
+        return Err(format!("Windows could not move it to the Recycle Bin (code {r})"));
+    }
+    if op.fAnyOperationsAborted != 0 || std::path::Path::new(path).exists() {
+        return Err("Cancelled, nothing was removed".into());
+    }
+    Ok(())
+}
+
+/// Open Explorer with the item selected.
+pub fn reveal(path: &str) -> bool {
+    Command::new("explorer.exe").raw_arg(format!("/select,\"{path}\"")).spawn().is_ok()
 }
 
 /// Run a program without flashing a console window and capture its output.

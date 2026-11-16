@@ -71,7 +71,11 @@ fn docker(args: &[&str]) -> (bool, u64) {
     }
 }
 
-fn run_special(s: Special) -> RuleResult {
+fn gb(b: u64) -> String {
+    format!("{:.2} GB", b as f64 / 1_073_741_824.0)
+}
+
+fn run_special(s: Special, stage: &mut dyn FnMut(String)) -> RuleResult {
     let mut r = RuleResult { id: String::new(), name: String::new(), freed: 0, files: 0, locked: 0, ok: true, note: String::new() };
     match s {
         Special::RecycleBin => {
@@ -125,6 +129,39 @@ fn run_special(s: Special) -> RuleResult {
             r.freed = if r.ok { before } else { 0 };
             r.note = "re-enable with: powercfg /h on".into();
         }
+        Special::DockerCompact => match crate::dockerdisk::compact(stage) {
+            Ok(done) => {
+                r.freed = done.iter().map(|(_, b, a)| b.saturating_sub(*a)).sum();
+                r.files = done.len() as u64;
+                r.note = done.iter().map(|(_, b, a)| format!("{} to {}", gb(*b), gb(*a))).collect::<Vec<_>>().join(", ");
+            }
+            Err(e) => {
+                r.ok = false;
+                r.note = e;
+            }
+        },
+        Special::OldDrivers => match crate::drivers::find() {
+            Ok(list) => {
+                let (mut removed, mut kept_in_use) = (0u64, 0u64);
+                for d in &list {
+                    stage(format!("Removing {} {} {}", d.provider, d.class, d.version));
+                    crate::drivers::remove(d);
+                    if std::path::Path::new(&d.folder).exists() {
+                        kept_in_use += 1;
+                    } else {
+                        removed += 1;
+                        r.freed += d.bytes;
+                    }
+                }
+                r.files = removed;
+                r.ok = removed > 0 || list.is_empty();
+                r.note = if kept_in_use > 0 { format!("{removed} removed, {kept_in_use} kept because Windows still uses them") } else { format!("{removed} old driver packages removed") };
+            }
+            Err(e) => {
+                r.ok = false;
+                r.note = e;
+            }
+        },
     }
     r
 }
@@ -194,7 +231,7 @@ pub fn execute(rules: &[&Rule], opts: &Options, is_admin: bool, on_event: &mut d
             }
             let mut res = match &rule.kind {
                 Kind::Paths(_) => run_paths(rule),
-                Kind::Special(sp) => run_special(*sp),
+                Kind::Special(sp) => run_special(*sp, &mut |m| on_event(Event::Stage { message: m })),
             };
             for s in &rule.services {
                 service("start", s);

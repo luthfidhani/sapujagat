@@ -28,8 +28,28 @@ const NEVER_FRAGMENTS: &[&str] = &[
     "\\program files\\windowsapps", "\\windows\\fonts",
 ];
 
+/// Lower-case form with one backslash between parts, so `C:\\a//b\` and `c:\a\b` compare equal.
+pub fn canon_key(s: &str) -> String {
+    let s = s.strip_prefix("\\\\?\\").unwrap_or(s).replace('/', "\\");
+    let mut out = String::with_capacity(s.len());
+    let mut prev_sep = false;
+    for (i, c) in s.chars().enumerate() {
+        if c == '\\' {
+            // keep a leading double backslash (UNC); collapse every other run
+            if prev_sep && i != 1 {
+                continue;
+            }
+            prev_sep = true;
+        } else {
+            prev_sep = false;
+        }
+        out.push(c);
+    }
+    out.trim_end_matches('\\').to_lowercase()
+}
+
 fn norm(p: &Path) -> String {
-    p.to_string_lossy().replace('/', "\\").trim_end_matches('\\').to_lowercase()
+    canon_key(&p.to_string_lossy())
 }
 
 static EXCLUDED: std::sync::RwLock<Vec<String>> = std::sync::RwLock::new(Vec::new());
@@ -259,6 +279,9 @@ mod tests {
     use super::*;
     use std::process::Command;
 
+    /// The exclusion list is process-global, so tests that set it must not run at the same time.
+    static EXCL_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn sandbox(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("sapu-test-{}-{}", name, std::process::id()));
         let _ = fs::remove_dir_all(&p);
@@ -386,7 +409,31 @@ mod tests {
     }
 
     #[test]
+    fn canon_key_ignores_separator_noise_and_case() {
+        assert_eq!(canon_key("C:\\\\Users\\\\Me\\"), "c:\\users\\me");
+        assert_eq!(canon_key("c:/users//me/"), "c:\\users\\me");
+        assert_eq!(canon_key("\\\\?\\C:\\Users\\Me"), "c:\\users\\me");
+        assert_eq!(canon_key("\\\\server\\share\\x"), "\\\\server\\share\\x");
+    }
+
+    #[test]
+    fn exclusion_with_doubled_backslashes_still_protects() {
+        let _g = EXCL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let root = sandbox("excl-dbl");
+        let keep = root.join("keepme");
+        fs::create_dir_all(&keep).unwrap();
+        fs::write(keep.join("important.dat"), b"precious").unwrap();
+        let weird = keep.display().to_string().replace('\\', "\\\\");
+        set_exclusions(&[weird]);
+        let _ = purge(&root, &Filter::new(None, 0));
+        set_exclusions(&[]);
+        assert!(keep.join("important.dat").exists(), "exclusion written with doubled backslashes did not protect");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn exclusions_protect_files_even_inside_a_cleaning_target() {
+        let _g = EXCL_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let root = sandbox("excl-root");
         let keep = root.join("keepme");
         fs::create_dir_all(&keep).unwrap();
