@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Sapu Jagat (preview)</title>
+  <script src="../ui/theme.js"></script>
+  <link rel="stylesheet" href="../ui/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="rail">
+      <div class="wordmark"><b>Sapu Jagat</b><span id="ver">System care</span></div>
+      <nav id="nav"></nav>
+      <div class="railfoot"><div class="priv" id="priv"></div><div class="seg" id="themeseg"></div></div>
+    </aside>
+    <main id="main"><div class="page" id="view"></div></main>
+  </div>
+  <div class="toasts" id="toasts"></div>
+  <script>
+    /* dev only: surface any script error on the page so screenshots reveal it */
+    window.addEventListener('error', function (e) {
+      var d = document.createElement('pre');
+      d.style.cssText = 'position:fixed;top:0;left:0;z-index:999;background:#fee;color:#900;padding:6px;font:12px monospace;max-width:100vw;white-space:pre-wrap';
+      d.textContent = e.message + ' @ ' + String(e.filename).split('/').pop() + ':' + e.lineno;
+      document.body.appendChild(d);
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var d = document.createElement('pre');
+      d.style.cssText = 'position:fixed;bottom:0;left:0;z-index:999;background:#fee;color:#900;padding:6px;font:12px monospace;max-width:100vw;white-space:pre-wrap';
+      d.textContent = 'rejection: ' + (e.reason && e.reason.stack || e.reason);
+      document.body.appendChild(d);
+    });
+  </script>
+  <script src="mock.js"></script>
+  <script src="../ui/js/core.js"></script>
+  <script src="../ui/js/overview.js"></script>
+  <script src="../ui/js/clean.js"></script>
+  <script src="../ui/js/boost.js"></script>
+  <script src="../ui/js/storage.js"></script>
+  <script src="../ui/js/info.js"></script>
+  <script src="../ui/js/start.js"></script>
+  <script src="act.js"></script>
+</body>
+</html>

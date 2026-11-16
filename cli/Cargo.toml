@@ -1,0 +1,16 @@
+[package]
+name = "sapujagat"
+version = "0.1.0"
+edition = "2021"
+description = "Sapu Jagat - terminal front-end"
+
+[[bin]]
+name = "sapu"
+path = "src/main.rs"
+
+[dependencies]
+sapu-core = { path = "../core" }
+clap = { version = "4", features = ["derive"] }
+console = "0.15"
+indicatif = "0.17"
+inquire = "0.7"

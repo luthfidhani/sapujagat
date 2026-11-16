@@ -1,0 +1,6 @@
+# build output
+/target/
+# Tauri generated schemas
+/gui/gen/
+# local test data
+*.log
