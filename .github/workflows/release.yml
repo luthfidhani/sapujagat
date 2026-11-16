@@ -1,0 +1,72 @@
+name: Release
+
+# Tag the commit to ship it:  git tag v0.1.0 && git push origin v0.1.0
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The installer is only built if this passes.
+  test:
+    uses: ./.github/workflows/test.yml
+
+  build:
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry and target
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check the tag matches the workspace version
+        shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate=$(grep -m1 '^version = ' Cargo.toml | sed -E 's/.*"(.*)".*/\1/')
+          echo "tag=$tag  Cargo.toml=$crate"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match version $crate in Cargo.toml. Bump [workspace.package] version first."
+            exit 1
+          fi
+
+      - name: Install the Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli
+
+      - name: Build the NSIS installer
+        working-directory: gui
+        run: cargo tauri build
+
+      - name: Build the CLI
+        run: cargo build --release --locked -p sapujagat
+
+      - name: Collect the artifacts
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp target/release/sapu.exe dist/
+          cp target/release/bundle/nsis/*-setup.exe dist/
+          ls -la dist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sapu-jagat-${{ github.ref_name }}
+          path: dist/*
+
+      - name: Publish the GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          draft: false
