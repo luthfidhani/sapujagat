@@ -1,7 +1,7 @@
 [package]
 name = "sapu-gui"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 description = "Sapu Jagat - desktop GUI (Tauri, HTML/CSS/JS front-end)"
 
 [[bin]]
