@@ -170,6 +170,10 @@ fn clean_cli(admin: bool, dry_run: bool, yes: bool, include_careful: bool, only:
     for r in &all {
         let s = by[r.id];
         let wanted = if !only.is_empty() { only.iter().any(|o| o == r.id) } else { r.default_on || (include_careful && r.risk == rules::Risk::Careful) };
+        if wanted && !s.available {
+            ui::warn(&format!("skipping '{}': {}", r.name, s.note.clone().unwrap_or_else(|| "not available on this PC".into())));
+            continue;
+        }
         if !wanted || !s.available {
             continue;
         }

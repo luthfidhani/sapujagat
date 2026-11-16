@@ -33,8 +33,14 @@ pub fn matches(token: &str, hay: &[String]) -> bool {
 
 const SKIP: &[&str] = &[
     "microsoft", "windows", "packages", "temp", "programs", "connecteddevicesplatform", "publishers", "comms", "history", "vs", "sapujagat",
-    "d3dscache", "crashdumps", "placeholdertilelogofolder", "diagnostics", "tempstate", "application data", "package cache", "ssh", "regid",
+    "id.sapujagat.app", "d3dscache", "crashdumps", "placeholdertilelogofolder", "diagnostics", "tempstate", "application data",
+    "package cache", "ssh", "regid", "usoshared", "usoprivate",
 ];
+
+/// Folders that belong to Windows or to this app are never reported.
+pub fn skipped(low: &str) -> bool {
+    SKIP.contains(&low) || low.starts_with("microsoft") || low.starts_with("windows") || low.starts_with("regid") || low.starts_with('.') || low.starts_with('$')
+}
 
 fn installed_identifiers() -> Vec<String> {
     let mut hay: Vec<String> = Vec::new();
@@ -116,7 +122,7 @@ pub fn find() -> Vec<Leftover> {
             }
             let name = e.file_name().to_string_lossy().to_string();
             let low = name.to_lowercase();
-            if SKIP.iter().any(|s| low == *s) || low.starts_with("microsoft") || low.starts_with("windows") || low.starts_with('.') || low.starts_with('$') {
+            if skipped(&low) {
                 continue;
             }
             if matches(&norm_token(&name), &hay) || fsx::is_excluded(&e.path()) || fsx::guard_opts(&e.path(), true).is_err() {
@@ -144,6 +150,14 @@ pub fn find() -> Vec<Leftover> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_and_own_folders_are_never_reported() {
+        for n in ["id.sapujagat.app", "sapujagat", "usoshared", "regid.1991-06.com.microsoft", "microsoft", "windowsapps", ".cache", "$recycle.bin"] {
+            assert!(skipped(n), "{n} should be skipped");
+        }
+        assert!(!skipped("dbeaverdata"));
+    }
 
     #[test]
     fn matching_is_substring_both_ways_and_ignores_short_noise() {

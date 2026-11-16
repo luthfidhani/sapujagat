@@ -168,6 +168,10 @@ fn scan_one(r: &Rule, running: &HashSet<String>, docker: &DockerState, admin: bo
                 if d.is_empty() {
                     s.available = false;
                     s.note = Some("no Docker virtual disk found".into());
+                } else if admin && d.iter().any(|(p, _)| !crate::dockerdisk::can_open(p)) {
+                    s.available = false;
+                    s.items = d.iter().map(|(p, b)| format!("{}  ({})", p.display(), gb(*b))).collect();
+                    s.note = Some(crate::dockerdisk::NO_ACCESS.into());
                 } else {
                     s.bytes = None;
                     s.files = d.len() as u64;
